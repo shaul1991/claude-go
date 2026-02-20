@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	claude "github.com/jihoonkim/claude-go"
+	claude "github.com/shaul1991/claude-go"
 )
 
 func main() {
