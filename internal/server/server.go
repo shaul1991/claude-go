@@ -26,6 +26,7 @@ func NewServer(config ServerConfig) *Server {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 	s.mux.HandleFunc("POST /v1/messages", s.handleMessages)
+	s.mux.HandleFunc("POST /v1/quiz", s.handleQuiz)
 }
 
 // ServeHTTP implements http.Handler with middleware chain.
@@ -40,6 +41,32 @@ func (s *Server) buildClient(req *MessagesRequest, systemPrompt string) *claude.
 
 	if req.Model != "" {
 		opts = append(opts, claude.WithModel(req.Model))
+	}
+	if systemPrompt != "" {
+		opts = append(opts, claude.WithSystemPrompt(systemPrompt))
+	}
+	if s.config.CLIPath != "" {
+		opts = append(opts, claude.WithCLIPath(s.config.CLIPath))
+	}
+	if s.config.WorkDir != "" {
+		opts = append(opts, claude.WithWorkDir(s.config.WorkDir))
+	}
+	if s.config.MaxBudget > 0 {
+		opts = append(opts, claude.WithMaxBudget(s.config.MaxBudget))
+	}
+	if s.config.MaxTurns > 0 {
+		opts = append(opts, claude.WithMaxTurns(s.config.MaxTurns))
+	}
+
+	return claude.NewClient(opts...)
+}
+
+// buildQuizClient creates a claude.Client configured for quiz grading.
+func (s *Server) buildQuizClient(model, systemPrompt string) *claude.Client {
+	var opts []claude.Option
+
+	if model != "" {
+		opts = append(opts, claude.WithModel(model))
 	}
 	if systemPrompt != "" {
 		opts = append(opts, claude.WithSystemPrompt(systemPrompt))

@@ -4,11 +4,12 @@ import "encoding/json"
 
 // ServerConfig holds server-level configuration.
 type ServerConfig struct {
-	APIKey   string
-	CLIPath  string
-	WorkDir  string
-	MaxBudget float64
-	MaxTurns  int
+	APIKey       string
+	CLIPath      string
+	WorkDir      string
+	DefaultModel string
+	MaxBudget    float64
+	MaxTurns     int
 }
 
 // --- Anthropic Messages API Request Types ---
@@ -108,4 +109,40 @@ type ErrorDetail struct {
 // HealthResponse is returned by GET /health.
 type HealthResponse struct {
 	Status string `json:"status"`
+}
+
+// --- Quiz API Types ---
+
+// QuizType represents the type of quiz question.
+type QuizType string
+
+const (
+	QuizTypeMultipleChoice QuizType = "multiple_choice"
+	QuizTypeShortAnswer    QuizType = "short_answer"
+	QuizTypeEssay          QuizType = "essay"
+)
+
+// QuizRequest is the request body for POST /v1/quiz.
+type QuizRequest struct {
+	Model    string   `json:"model,omitempty"`
+	Question string   `json:"question"`
+	Type     QuizType `json:"type"`
+	Options  []string `json:"options,omitempty"`
+	Answer   string   `json:"answer"`
+}
+
+// QuizResult holds the grading result from Claude.
+type QuizResult struct {
+	Correct     bool   `json:"correct"`
+	Score       int    `json:"score"`
+	Feedback    string `json:"feedback"`
+	ModelAnswer string `json:"model_answer"`
+}
+
+// QuizResponse is the response body for POST /v1/quiz.
+type QuizResponse struct {
+	ID     string        `json:"id"`
+	Result QuizResult    `json:"result"`
+	Model  string        `json:"model"`
+	Usage  MessagesUsage `json:"usage"`
 }

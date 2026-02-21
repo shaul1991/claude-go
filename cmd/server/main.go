@@ -25,16 +25,18 @@ func main() {
 	apiKey := flag.String("api-key", os.Getenv("API_KEY"), "API key for authentication (empty = no auth)")
 	cliPath := flag.String("cli-path", os.Getenv("CLAUDE_CLI_PATH"), "path to claude CLI binary")
 	workDir := flag.String("work-dir", os.Getenv("CLAUDE_WORK_DIR"), "working directory for claude CLI")
+	defaultModel := flag.String("model", envOrDefault("CLAUDE_MODEL", "opus"), "default model when not specified in request")
 	maxBudget := flag.Float64("max-budget", 0, "max budget in USD per request")
 	maxTurns := flag.Int("max-turns", 0, "max turns per request")
 	flag.Parse()
 
 	config := server.ServerConfig{
-		APIKey:    *apiKey,
-		CLIPath:   *cliPath,
-		WorkDir:   *workDir,
-		MaxBudget: *maxBudget,
-		MaxTurns:  *maxTurns,
+		APIKey:       *apiKey,
+		CLIPath:      *cliPath,
+		WorkDir:      *workDir,
+		DefaultModel: *defaultModel,
+		MaxBudget:    *maxBudget,
+		MaxTurns:     *maxTurns,
 	}
 
 	srv := &http.Server{
@@ -66,4 +68,11 @@ func main() {
 		log.Fatalf("server shutdown: %v", err)
 	}
 	log.Println("server stopped")
+}
+
+func envOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
