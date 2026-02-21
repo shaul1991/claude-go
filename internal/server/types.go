@@ -1,64 +1,109 @@
 package server
 
-// ClientOptions maps to the claude.Option functional options.
-type ClientOptions struct {
-	Model              string   `json:"model,omitempty"`
-	SystemPrompt       string   `json:"system_prompt,omitempty"`
-	AppendSystemPrompt string   `json:"append_system_prompt,omitempty"`
-	AllowedTools       []string `json:"allowed_tools,omitempty"`
-	MaxTurns           int      `json:"max_turns,omitempty"`
-	MaxBudgetUSD       float64  `json:"max_budget_usd,omitempty"`
-	WorkDir            string   `json:"work_dir,omitempty"`
-	CLIPath            string   `json:"cli_path,omitempty"`
+import "encoding/json"
+
+// ServerConfig holds server-level configuration.
+type ServerConfig struct {
+	APIKey   string
+	CLIPath  string
+	WorkDir  string
+	MaxBudget float64
+	MaxTurns  int
 }
 
-// AskRequest is the request body for POST /api/v1/ask.
-type AskRequest struct {
-	Prompt  string         `json:"prompt"`
-	Options *ClientOptions `json:"options,omitempty"`
+// --- Anthropic Messages API Request Types ---
+
+// MessagesRequest is the request body for POST /v1/messages.
+type MessagesRequest struct {
+	Model         string            `json:"model"`
+	MaxTokens     int               `json:"max_tokens"`
+	Messages      []Message         `json:"messages"`
+	System        json.RawMessage   `json:"system,omitempty"`
+	Stream        bool              `json:"stream,omitempty"`
+	Temperature   *float64          `json:"temperature,omitempty"`
+	TopP          *float64          `json:"top_p,omitempty"`
+	TopK          *int              `json:"top_k,omitempty"`
+	StopSequences []string          `json:"stop_sequences,omitempty"`
+	Metadata      *RequestMetadata  `json:"metadata,omitempty"`
+	Tools         []Tool            `json:"tools,omitempty"`
+	ToolChoice    json.RawMessage   `json:"tool_choice,omitempty"`
 }
 
-// AskJSONRequest is the request body for POST /api/v1/ask-json.
-type AskJSONRequest struct {
-	Prompt  string         `json:"prompt"`
-	Options *ClientOptions `json:"options,omitempty"`
+// Message represents a single message in the conversation.
+type Message struct {
+	Role    string          `json:"role"`
+	Content json.RawMessage `json:"content"`
 }
 
-// AskWithSchemaRequest is the request body for POST /api/v1/ask-with-schema.
-type AskWithSchemaRequest struct {
-	Prompt  string         `json:"prompt"`
-	Schema  string         `json:"schema"`
-	Options *ClientOptions `json:"options,omitempty"`
+// ContentBlock represents a content block in a message.
+type ContentBlock struct {
+	Type   string          `json:"type"`
+	Text   string          `json:"text,omitempty"`
+	Source json.RawMessage `json:"source,omitempty"`
+	ID     string          `json:"id,omitempty"`
+	Name   string          `json:"name,omitempty"`
+	Input  json.RawMessage `json:"input,omitempty"`
 }
 
-// ResumeRequest is the request body for POST /api/v1/resume.
-type ResumeRequest struct {
-	SessionID string         `json:"session_id"`
-	Prompt    string         `json:"prompt"`
-	Options   *ClientOptions `json:"options,omitempty"`
+// SystemBlock represents a system prompt block.
+type SystemBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
 }
 
-// ContinueRequest is the request body for POST /api/v1/continue.
-type ContinueRequest struct {
-	Prompt  string         `json:"prompt"`
-	Options *ClientOptions `json:"options,omitempty"`
+// RequestMetadata holds optional request metadata.
+type RequestMetadata struct {
+	UserID string `json:"user_id,omitempty"`
 }
 
-// StreamRequest is the request body for POST /api/v1/stream.
-type StreamRequest struct {
-	Prompt  string         `json:"prompt"`
-	Options *ClientOptions `json:"options,omitempty"`
+// Tool represents a tool definition.
+type Tool struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	InputSchema json.RawMessage `json:"input_schema,omitempty"`
 }
 
-// TextResponse wraps a plain-text result.
-type TextResponse struct {
-	Result string `json:"result"`
+// --- Anthropic Messages API Response Types ---
+
+// MessagesResponse is the response body for POST /v1/messages (non-streaming).
+type MessagesResponse struct {
+	ID           string              `json:"id"`
+	Type         string              `json:"type"`
+	Role         string              `json:"role"`
+	Content      []ResponseContent   `json:"content"`
+	Model        string              `json:"model"`
+	StopReason   *string             `json:"stop_reason"`
+	StopSequence *string             `json:"stop_sequence"`
+	Usage        MessagesUsage       `json:"usage"`
 }
 
-// ErrorResponse is returned on errors.
+// ResponseContent represents a content block in the response.
+type ResponseContent struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+}
+
+// MessagesUsage holds token usage for the response.
+type MessagesUsage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+}
+
+// --- Error Types ---
+
+// ErrorResponse is the Anthropic API error format.
 type ErrorResponse struct {
-	Error string `json:"error"`
+	Type  string      `json:"type"`
+	Error ErrorDetail `json:"error"`
 }
+
+// ErrorDetail holds error details.
+type ErrorDetail struct {
+	Type    string `json:"type"`
+	Message string `json:"message"`
+}
+
+// --- Health ---
 
 // HealthResponse is returned by GET /health.
 type HealthResponse struct {

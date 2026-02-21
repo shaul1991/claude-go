@@ -1,137 +1,67 @@
 package server
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 )
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, HealthResponse{Status: "ok"})
 }
 
-func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
-	var req AskRequest
+func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
+	var req MessagesRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if req.Prompt == "" {
-		respondError(w, http.StatusBadRequest, "prompt is required")
+		respondError(w, http.StatusBadRequest, "invalid_request_error", "invalid JSON in request body")
 		return
 	}
 
-	client := buildClient(req.Options)
-	result, err := client.Ask(r.Context(), req.Prompt)
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+	if err := validateRequest(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}
-	respondJSON(w, http.StatusOK, TextResponse{Result: result})
+
+	systemPrompt := extractSystemPrompt(req.System)
+	prompt := extractPrompt(req.Messages)
+
+	if req.Stream {
+		s.handleStream(w, r, &req, systemPrompt, prompt)
+	} else {
+		s.handleNonStream(w, r, &req, systemPrompt, prompt)
+	}
 }
 
-func (s *Server) handleAskJSON(w http.ResponseWriter, r *http.Request) {
-	var req AskJSONRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if req.Prompt == "" {
-		respondError(w, http.StatusBadRequest, "prompt is required")
+func (s *Server) handleNonStream(w http.ResponseWriter, r *http.Request, req *MessagesRequest, systemPrompt, prompt string) {
+	client := s.buildClient(req, systemPrompt)
+	resp, err := client.AskJSON(r.Context(), prompt)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "api_error", err.Error())
 		return
 	}
 
-	client := buildClient(req.Options)
-	resp, err := client.AskJSON(r.Context(), req.Prompt)
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	respondJSON(w, http.StatusOK, resp)
+	stopReason := "end_turn"
+	respondJSON(w, http.StatusOK, MessagesResponse{
+		ID:         generateMsgID(resp.SessionID),
+		Type:       "message",
+		Role:       "assistant",
+		Content:    []ResponseContent{{Type: "text", Text: resp.Result}},
+		Model:      resp.Model,
+		StopReason: &stopReason,
+		Usage: MessagesUsage{
+			InputTokens:  resp.Usage.InputTokens,
+			OutputTokens: resp.Usage.OutputTokens,
+		},
+	})
 }
 
-func (s *Server) handleAskWithSchema(w http.ResponseWriter, r *http.Request) {
-	var req AskWithSchemaRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if req.Prompt == "" {
-		respondError(w, http.StatusBadRequest, "prompt is required")
-		return
-	}
-	if req.Schema == "" {
-		respondError(w, http.StatusBadRequest, "schema is required")
-		return
-	}
-
-	client := buildClient(req.Options)
-	resp, err := client.AskWithSchema(r.Context(), req.Prompt, req.Schema)
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	respondJSON(w, http.StatusOK, resp)
-}
-
-func (s *Server) handleResume(w http.ResponseWriter, r *http.Request) {
-	var req ResumeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if req.SessionID == "" {
-		respondError(w, http.StatusBadRequest, "session_id is required")
-		return
-	}
-	if req.Prompt == "" {
-		respondError(w, http.StatusBadRequest, "prompt is required")
-		return
-	}
-
-	client := buildClient(req.Options)
-	resp, err := client.Resume(r.Context(), req.SessionID, req.Prompt)
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	respondJSON(w, http.StatusOK, resp)
-}
-
-func (s *Server) handleContinue(w http.ResponseWriter, r *http.Request) {
-	var req ContinueRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if req.Prompt == "" {
-		respondError(w, http.StatusBadRequest, "prompt is required")
-		return
-	}
-
-	client := buildClient(req.Options)
-	resp, err := client.Continue(r.Context(), req.Prompt)
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	respondJSON(w, http.StatusOK, resp)
-}
-
-func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
-	var req StreamRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if req.Prompt == "" {
-		respondError(w, http.StatusBadRequest, "prompt is required")
-		return
-	}
-
+func (s *Server) handleStream(w http.ResponseWriter, r *http.Request, req *MessagesRequest, systemPrompt, prompt string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		respondError(w, http.StatusInternalServerError, "streaming not supported")
+		respondError(w, http.StatusInternalServerError, "api_error", "streaming not supported")
 		return
 	}
 
@@ -139,25 +69,134 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	client := buildClient(req.Options)
-	events, errc := client.AskStream(r.Context(), req.Prompt)
+	client := s.buildClient(req, systemPrompt)
+	events, errc := client.AskStream(r.Context(), prompt)
 
 	for ev := range events {
-		data, err := json.Marshal(ev)
-		if err != nil {
-			fmt.Fprintf(w, "data: {\"error\":%q}\n\n", err.Error())
-			flusher.Flush()
-			return
+		if ev.Type != "stream_event" || ev.Event == nil {
+			continue
 		}
-		fmt.Fprintf(w, "data: %s\n\n", data)
-		flusher.Flush()
+
+		var inner struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(ev.Event, &inner); err != nil {
+			continue
+		}
+
+		writeSSE(w, flusher, inner.Type, ev.Event)
 	}
 
 	if err := <-errc; err != nil {
-		fmt.Fprintf(w, "data: {\"error\":%q}\n\n", err.Error())
-		flusher.Flush()
+		errData, _ := json.Marshal(ErrorResponse{
+			Type: "error",
+			Error: ErrorDetail{
+				Type:    "api_error",
+				Message: err.Error(),
+			},
+		})
+		writeSSE(w, flusher, "error", errData)
+	}
+}
+
+// validateRequest checks required fields in the Messages API request.
+func validateRequest(req *MessagesRequest) error {
+	if req.Model == "" {
+		return fmt.Errorf("model is required")
+	}
+	if req.MaxTokens <= 0 {
+		return fmt.Errorf("max_tokens is required and must be > 0")
+	}
+	if len(req.Messages) == 0 {
+		return fmt.Errorf("messages is required and must not be empty")
+	}
+	return nil
+}
+
+// extractPrompt converts the messages array into a single prompt string for the CLI.
+func extractPrompt(messages []Message) string {
+	if len(messages) == 1 {
+		return contentToText(messages[0].Content)
 	}
 
-	fmt.Fprintf(w, "data: [DONE]\n\n")
+	var parts []string
+	for _, m := range messages {
+		text := contentToText(m.Content)
+		switch m.Role {
+		case "user":
+			parts = append(parts, "Human: "+text)
+		case "assistant":
+			parts = append(parts, "Assistant: "+text)
+		default:
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// contentToText extracts text from a message's content field.
+// Content can be a plain string or an array of content blocks.
+func contentToText(raw json.RawMessage) string {
+	// Try string first
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+
+	// Try array of content blocks
+	var blocks []ContentBlock
+	if err := json.Unmarshal(raw, &blocks); err == nil {
+		var texts []string
+		for _, b := range blocks {
+			if b.Type == "text" && b.Text != "" {
+				texts = append(texts, b.Text)
+			}
+		}
+		return strings.Join(texts, "\n")
+	}
+
+	return string(raw)
+}
+
+// extractSystemPrompt parses the system field which can be a string or []SystemBlock.
+func extractSystemPrompt(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+
+	// Try string first
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+
+	// Try array of system blocks
+	var blocks []SystemBlock
+	if err := json.Unmarshal(raw, &blocks); err == nil {
+		var texts []string
+		for _, b := range blocks {
+			if b.Text != "" {
+				texts = append(texts, b.Text)
+			}
+		}
+		return strings.Join(texts, "\n")
+	}
+
+	return ""
+}
+
+// generateMsgID creates a message ID with msg_ prefix.
+func generateMsgID(sessionID string) string {
+	if sessionID != "" {
+		return "msg_" + sessionID
+	}
+	b := make([]byte, 16)
+	rand.Read(b)
+	return "msg_" + hex.EncodeToString(b)
+}
+
+// writeSSE writes a single SSE event and flushes.
+func writeSSE(w http.ResponseWriter, flusher http.Flusher, event string, data []byte) {
+	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data)
 	flusher.Flush()
 }

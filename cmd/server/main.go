@@ -22,11 +22,24 @@ func main() {
 
 	port := flag.String("port", defaultPort, "server port")
 	host := flag.String("host", "0.0.0.0", "server host")
+	apiKey := flag.String("api-key", os.Getenv("API_KEY"), "API key for authentication (empty = no auth)")
+	cliPath := flag.String("cli-path", os.Getenv("CLAUDE_CLI_PATH"), "path to claude CLI binary")
+	workDir := flag.String("work-dir", os.Getenv("CLAUDE_WORK_DIR"), "working directory for claude CLI")
+	maxBudget := flag.Float64("max-budget", 0, "max budget in USD per request")
+	maxTurns := flag.Int("max-turns", 0, "max turns per request")
 	flag.Parse()
+
+	config := server.ServerConfig{
+		APIKey:    *apiKey,
+		CLIPath:   *cliPath,
+		WorkDir:   *workDir,
+		MaxBudget: *maxBudget,
+		MaxTurns:  *maxTurns,
+	}
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf("%s:%s", *host, *port),
-		Handler:      server.NewServer(),
+		Handler:      server.NewServer(config),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 600 * time.Second,
 		IdleTimeout:  120 * time.Second,

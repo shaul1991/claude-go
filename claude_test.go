@@ -93,7 +93,7 @@ func TestBuildArgsStreamJSON(t *testing.T) {
 	c := NewClient()
 	args := c.buildArgs("test", FormatStreamJSON)
 
-	expected := []string{"-p", "test", "--output-format", "stream-json", "--verbose"}
+	expected := []string{"-p", "test", "--output-format", "stream-json", "--verbose", "--include-partial-messages"}
 	assertArgs(t, expected, args)
 }
 

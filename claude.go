@@ -39,7 +39,7 @@ func (c *Client) buildArgs(prompt string, format OutputFormat, extra ...string) 
 	args := []string{"-p", prompt, "--output-format", string(format)}
 
 	if format == FormatStreamJSON {
-		args = append(args, "--verbose")
+		args = append(args, "--verbose", "--include-partial-messages")
 	}
 
 	if c.model != "" {

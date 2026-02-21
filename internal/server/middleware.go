@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"time"
@@ -15,6 +16,13 @@ type responseWriter struct {
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+// Flush delegates to the underlying ResponseWriter if it supports http.Flusher.
+func (rw *responseWriter) Flush() {
+	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 // loggingMiddleware logs method, path, status code, and duration.
@@ -32,10 +40,43 @@ func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, x-api-key, anthropic-version, Authorization")
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// authMiddleware validates the x-api-key header. If expectedKey is empty, auth is skipped.
+func authMiddleware(expectedKey string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if expectedKey == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		key := r.Header.Get("x-api-key")
+		if key == "" {
+			key = r.Header.Get("Authorization")
+			if len(key) > 7 && key[:7] == "Bearer " {
+				key = key[7:]
+			}
+		}
+
+		if key != expectedKey {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(ErrorResponse{
+				Type: "error",
+				Error: ErrorDetail{
+					Type:    "authentication_error",
+					Message: "invalid x-api-key",
+				},
+			})
 			return
 		}
 
