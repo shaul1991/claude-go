@@ -2,6 +2,8 @@
 
 [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)를 Go에서 프로그래밍적으로 사용할 수 있는 래퍼 라이브러리. `os/exec`로 `claude -p`를 호출하고, 결과를 Go 구조체로 파싱하여 반환합니다.
 
+Anthropic Messages API(`POST /v1/messages`) 호환 HTTP 서버도 내장하고 있어, 기존 Anthropic API 클라이언트와 호환되는 프록시 서버로 활용할 수 있습니다.
+
 ## 사전 요구사항
 
 - Go 1.21+
@@ -44,7 +46,7 @@ func main() {
 }
 ```
 
-## API
+## Go 라이브러리 API
 
 ### 클라이언트 생성
 
@@ -125,9 +127,100 @@ if err := <-errc; err != nil {
 }
 ```
 
+## HTTP 서버 (Anthropic Messages API 호환)
+
+내장 HTTP 서버는 Anthropic Messages API(`POST /v1/messages`)와 동일한 인터페이스를 제공합니다. 기존 Anthropic API 클라이언트에서 엔드포인트만 변경하면 바로 사용할 수 있습니다.
+
+### 서버 실행
+
+```bash
+# 빌드
+go build -o bin/claude-server ./cmd/server
+
+# 기본 실행 (포트 8080, 인증 없음)
+./bin/claude-server
+
+# 옵션 지정
+./bin/claude-server \
+  -port 8080 \
+  -api-key "my-secret-key" \
+  -cli-path /usr/local/bin/claude \
+  -work-dir /path/to/project \
+  -max-budget 1.0 \
+  -max-turns 10
+```
+
+### 서버 옵션
+
+| 플래그 | 환경변수 | 설명 |
+|--------|---------|------|
+| `-port` | `PORT` | 서버 포트 (기본값: `8080`) |
+| `-host` | - | 서버 호스트 (기본값: `0.0.0.0`) |
+| `-api-key` | `API_KEY` | API 키 (빈 값이면 인증 건너뜀) |
+| `-cli-path` | `CLAUDE_CLI_PATH` | claude CLI 바이너리 경로 |
+| `-work-dir` | `CLAUDE_WORK_DIR` | claude CLI 실행 디렉토리 |
+| `-max-budget` | - | 요청당 최대 예산 (USD) |
+| `-max-turns` | - | 요청당 최대 턴 수 |
+
+### API 엔드포인트
+
+#### `GET /health`
+
+헬스 체크.
+
+```bash
+curl http://localhost:8080/health
+# {"status":"ok"}
+```
+
+#### `POST /v1/messages`
+
+Anthropic Messages API 호환 엔드포인트. 비스트리밍 및 스트리밍 모두 지원.
+
+**인증:** `x-api-key` 헤더 또는 `Authorization: Bearer <key>` (서버에 `-api-key` 설정 시).
+
+**비스트리밍 요청:**
+
+```bash
+curl -X POST http://localhost:8080/v1/messages \
+  -H "content-type: application/json" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "sonnet",
+    "max_tokens": 1024,
+    "messages": [{"role": "user", "content": "What is 2+2?"}]
+  }'
+```
+
+**스트리밍 요청:**
+
+```bash
+curl -X POST http://localhost:8080/v1/messages \
+  -H "content-type: application/json" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "sonnet",
+    "max_tokens": 1024,
+    "stream": true,
+    "messages": [{"role": "user", "content": "Count 1 to 5"}]
+  }'
+```
+
+**시스템 프롬프트 (문자열 또는 배열):**
+
+```json
+{
+  "model": "sonnet",
+  "max_tokens": 1024,
+  "system": "You are a helpful assistant.",
+  "messages": [{"role": "user", "content": "Hello"}]
+}
+```
+
 ## 응답 타입
 
 ```go
+// Go 라이브러리 응답
 type Response struct {
     SessionID string `json:"session_id"`
     Result    string `json:"result"`
@@ -161,14 +254,23 @@ go test -v ./...
 
 ```
 claude-go/
-├── go.mod          # 모듈 정의
-├── claude.go       # Client 구조체 및 핵심 메서드
-├── options.go      # Functional options
-├── types.go        # 요청/응답 타입 정의
-├── stream.go       # 스트리밍 응답 처리
-├── claude_test.go  # 테스트
-└── examples/
-    └── main.go     # 사용 예제
+├── go.mod              # 모듈 정의
+├── claude.go           # Client 구조체 및 핵심 메서드
+├── options.go          # Functional options
+├── types.go            # 요청/응답 타입 정의
+├── stream.go           # 스트리밍 응답 처리
+├── claude_test.go      # 테스트
+├── examples/
+│   └── main.go         # 사용 예제
+├── cmd/
+│   └── server/
+│       └── main.go     # HTTP 서버 엔트리포인트
+└── internal/
+    └── server/
+        ├── server.go     # 서버 설정, 라우팅, 미들웨어 체인
+        ├── handler.go    # Messages API 핸들러 (스트리밍/비스트리밍)
+        ├── middleware.go  # 로깅, CORS, 인증 미들웨어
+        └── types.go      # Anthropic Messages API 타입 정의
 ```
 
 ## 라이선스
